@@ -55,7 +55,10 @@ txn_data = pd.read_sql_query('''
     )
     SELECT a."UserName", a."FirstName", a."LastName", a."CountryCode",
            a."AffiliateId", a."registration_date", a."last_login_date",
-           case when a."PaymentSystemId" = 326 then 'Card' else 'Others' end as "Payment_Method",
+           case when a."PaymentSystemId" = 326 then 'Card' 
+                when a."PaymentSystemId" = 147 then 'Crypto' 
+                when a."PaymentSystemId" = 324 then 'Crypto Bridge' 
+                else 'Others' end as "Payment_Method",
            b."last_Txn_Date", 
            b."Life_Time_Dpst_Cnt", 
            b."Life_Time_Dpst_Value", 
