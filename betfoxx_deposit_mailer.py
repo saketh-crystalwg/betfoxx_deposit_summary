@@ -17,8 +17,6 @@ engine = create_engine(
 txn_data = pd.read_sql_query('''
     WITH base AS (
         SELECT a.*, 
-               b.\"CountryState\", 
-               b.\"AffiliateId\", 
                DATE(b.\"CreationTime\") AS "registration_date", 
                DATE(b.\"LastSessionDate\") AS "last_login_date", 
                DATE(a.\"CreationTime\") AS "txn_date", 
@@ -43,19 +41,21 @@ txn_data = pd.read_sql_query('''
         SELECT a.\"UserName\", 
                a.\"FirstName\", 
                a.\"LastName\", 
-               a.\"CountryState\", 
-               a.\"AffiliatePlatformId\", 
+               a.\"CountryCode\", 
+               a.\"AffiliateId\", 
                a."registration_date", 
                a."last_login_date", 
-               a."txn_date", 
+               a."txn_date",
+               a."PaymentSystemId",
                SUM(a."Amount_Euro") AS "dpst_amount", 
                COUNT(\"Id\") AS "dpst_cnt" 
         FROM base AS a 
         WHERE "txn_date" = CURRENT_DATE - 1 
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8,9
     )
-    SELECT a."UserName", a."FirstName", a."LastName", a."CountryState",
-           a."AffiliatePlatformId", a."registration_date", a."last_login_date",
+    SELECT a."UserName", a."FirstName", a."LastName", a."CountryCode",
+           a."AffiliateId", a."registration_date", a."last_login_date",
+           case when a."PaymentSystemId" = 326 then 'Card' else 'Others' end as "Payment_Method",
            b."last_Txn_Date", 
            b."Life_Time_Dpst_Cnt", 
            b."Life_Time_Dpst_Value", 
@@ -63,6 +63,7 @@ txn_data = pd.read_sql_query('''
     FROM prev_day AS a  
     LEFT JOIN life_time_txns AS b ON a."UserName" = b."UserName"
 ''', con=engine)
+
 
 mailer_df = txn_data.fillna(0)
 
@@ -88,6 +89,26 @@ with pd.ExcelWriter(filename) as writer:
     DS_Overall.reset_index(drop=True).to_excel(writer, sheet_name="Betfoxx",index=False)
     
 sub = f'Betfoxx_Deposits_Summary_{date_1}'
+
+# Write the DataFrame to Excel
+with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+    DS_Overall.reset_index(drop=True).to_excel(writer, sheet_name="Betfoxx", index=False)
+
+# Open the workbook again to adjust column widths
+with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
+    # Access the workbook and worksheet objects
+    workbook = writer.book
+    worksheet = writer.sheets['Betfoxx']
+
+    # Adjust the width of each column based on the length of the column names
+    for column in worksheet.columns:
+        max_length = 0
+        column_name = column[0].column_letter
+        for cell in column:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        adjusted_width = (max_length + 2) * 1.2
+        worksheet.column_dimensions[column_name].width = adjusted_width
 
 
 #!/usr/bin/python
