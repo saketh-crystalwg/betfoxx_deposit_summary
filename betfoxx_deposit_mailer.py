@@ -9,6 +9,8 @@ from mysql.connector import Error
 
 from sqlalchemy import create_engine
 
+from openpyxl.styles import Alignment
+
 engine = create_engine(
     'postgresql://orpctbsqvqtnrx:530428203217ce11da9eb9586a5513d0c7fe08555c116c103fd43fb78a81c944@ec2-34-202-53-101.compute-1.amazonaws.com:5432/d46bn1u52baq92', \
     echo=False)
@@ -18,8 +20,7 @@ txn_data = pd.read_sql_query('''
     WITH base AS (
         SELECT a.*, 
                DATE(b.\"CreationTime\") AS "registration_date", 
-               DATE(b.\"LastSessionDate\") AS "last_login_date", 
-               DATE(a.\"CreationTime\") AS "txn_date", 
+               DATE(a.\"CreationTime\") AS "Txn_Date", 
                CASE 
                    WHEN a.\"CurrencyId\" = 'EUR' THEN \"Amount\" 
                    WHEN a."CurrencyId\" = 'USD' THEN \"Amount\" * 0.92 
@@ -28,14 +29,13 @@ txn_data = pd.read_sql_query('''
         FROM customer_transactions_betfoxx AS a 
         LEFT JOIN customers_betfoxx AS b ON a.\"UserName\" = b.\"UserName\" 
         WHERE a.\"State\" IN (8, 12)
-    ),
+        ),
     life_time_txns AS (
-        SELECT \"UserName\",  
+        SELECT \"UserName\",  "Type",
                COUNT(DISTINCT \"Id\") AS "Life_Time_Dpst_Cnt", 
-               SUM("Amount_Euro") AS "Life_Time_Dpst_Value", 
-               MAX("txn_date") AS "last_Txn_Date" 
+               SUM("Amount_Euro") AS "Life_Time_Dpst_Value"
         FROM base
-        GROUP BY 1
+        GROUP BY 1,2
     ),
     prev_day AS (
         SELECT a.\"UserName\", 
@@ -44,27 +44,27 @@ txn_data = pd.read_sql_query('''
                a.\"CountryCode\", 
                a.\"AffiliateId\", 
                a."registration_date", 
-               a."last_login_date", 
-               a."txn_date",
+               a."Txn_Date",
+               a."Type",
                a."PaymentSystemId",
-               SUM(a."Amount_Euro") AS "dpst_amount", 
-               COUNT(\"Id\") AS "dpst_cnt" 
+               (a."Amount_Euro") AS "txn_amount", 
+               (\"Id\") AS "Transaction_ID" 
         FROM base AS a 
-        WHERE "txn_date" = CURRENT_DATE - 1 
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8,9
+        WHERE "Txn_Date" = CURRENT_DATE - 1 
     )
-    SELECT a."UserName", a."FirstName", a."LastName", a."CountryCode",
-           a."AffiliateId", a."registration_date", a."last_login_date",
+    SELECT a."UserName", a."FirstName", a."LastName", a."Transaction_ID", a."CountryCode",
+           a."Type",
+           a."AffiliateId", a."registration_date",
            case when a."PaymentSystemId" = 326 then 'Card' 
                 when a."PaymentSystemId" = 147 then 'Crypto' 
                 when a."PaymentSystemId" = 324 then 'Crypto Bridge' 
                 else 'Others' end as "Payment_Method",
-           b."last_Txn_Date", 
            b."Life_Time_Dpst_Cnt", 
            b."Life_Time_Dpst_Value", 
-           a."txn_date", a."dpst_amount", a."dpst_cnt"
+           a."Txn_Date", a."txn_amount"
     FROM prev_day AS a  
     LEFT JOIN life_time_txns AS b ON a."UserName" = b."UserName"
+    and a."Type" = b."Type"
 ''', con=engine)
 
 
@@ -72,46 +72,81 @@ mailer_df = txn_data.fillna(0)
 
 mailer_df["Life_Time_Dpst_Value"] = mailer_df["Life_Time_Dpst_Value"].apply(lambda x: format_currency(x, currency="EUR", locale="nl_NL"))
 
-total = mailer_df[['dpst_amount','dpst_cnt']].apply(np.sum)
+total = mailer_df[mailer_df['Type'] == 2][['txn_amount']].apply(np.sum)
 
 total['UserName'] = 'Total'
 
-DS_Overall = pd.concat([mailer_df,pd.DataFrame(total.values, index=total.keys()).T], ignore_index=True)
+total_wd = mailer_df[mailer_df['Type'] == 3][['txn_amount']].apply(np.sum)
 
-DS_Overall.rename(columns={'dpst_amount':'Deposit_Amount','dpst_cnt':'Deposit_Count'},inplace = True)
+total_wd['UserName'] = 'Total'
+
+
+DS_Overall = pd.concat([mailer_df[mailer_df['Type'] == 2],pd.DataFrame(total.values, index=total.keys()).T], ignore_index=True)
+
+DS_Overall.rename(columns={'txn_amount':'Deposit_Amount'},inplace = True)
 
 DS_Overall["Deposit_Amount"] = DS_Overall["Deposit_Amount"].apply(lambda x: format_currency(x, currency="EUR", locale="nl_NL"))
+
+
+
+WD_Overall = pd.concat([mailer_df[mailer_df['Type'] == 3],pd.DataFrame(total_wd.values, index=total.keys()).T], ignore_index=True)
+
+WD_Overall.rename(columns={'txn_amount':'Withdrawal_Amount'},inplace = True)
+
+WD_Overall.rename(columns={'Life_Time_Dpst_Cnt':'Life_Time_WDRL_Cnt', 'Life_Time_Dpst_Value':'Life_Time_WDRL_Value'},inplace = True)
+
+
+WD_Overall["Withdrawal_Amount"] = WD_Overall["Withdrawal_Amount"].apply(lambda x: format_currency(x, currency="EUR", locale="nl_NL"))
+
+
 
 date = dt.datetime.today()-  timedelta(1)
 date_1 = date.strftime("%m-%d-%Y")
 filename = f'Betfoxx_Daily_Deposits_{date_1}.xlsx'
 
-
-
-with pd.ExcelWriter(filename) as writer:
-    DS_Overall.reset_index(drop=True).to_excel(writer, sheet_name="Betfoxx",index=False)
     
 sub = f'Betfoxx_Deposits_Summary_{date_1}'
 
 # Write the DataFrame to Excel
 with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-    DS_Overall.reset_index(drop=True).to_excel(writer, sheet_name="Betfoxx", index=False)
+    DS_Overall[DS_Overall['Type'] != 3].drop(columns=['Type']).reset_index(drop=True).to_excel(writer, sheet_name="Deposits", index=False)
+    WD_Overall[DS_Overall['Type'] != 2].drop(columns=['Type']).reset_index(drop=True).to_excel(writer, sheet_name="Withdrawals", index=False)
 
 # Open the workbook again to adjust column widths
 with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
     # Access the workbook and worksheet objects
     workbook = writer.book
-    worksheet = writer.sheets['Betfoxx']
+    worksheet1 = writer.sheets['Deposits']
+    worksheet2 = writer.sheets['Withdrawals']
 
     # Adjust the width of each column based on the length of the column names
-    for column in worksheet.columns:
+    for column in worksheet1.columns:
         max_length = 0
         column_name = column[0].column_letter
         for cell in column:
             if cell.value:
                 max_length = max(max_length, len(str(cell.value)))
         adjusted_width = (max_length + 2) * 1.2
-        worksheet.column_dimensions[column_name].width = adjusted_width
+        worksheet1.column_dimensions[column_name].width = adjusted_width
+    
+    for column in worksheet1.iter_cols(min_col=1, max_col=len(DS_Overall.columns)):
+        for cell in column:
+            cell.alignment = Alignment(horizontal='center')
+
+    for column in worksheet2.columns:
+        max_length = 0
+        column_name = column[0].column_letter
+        for cell in column:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        adjusted_width = (max_length + 2) * 1.2
+        worksheet2.column_dimensions[column_name].width = adjusted_width
+
+    # Center align text in all cells in the "Withdrawals" sheet
+    for row in worksheet2.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(horizontal='center')
+
 
 
 #!/usr/bin/python
