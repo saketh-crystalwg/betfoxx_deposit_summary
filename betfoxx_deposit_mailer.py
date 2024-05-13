@@ -102,10 +102,10 @@ WD_Overall["Withdrawal_Amount"] = WD_Overall["Withdrawal_Amount"].apply(lambda x
 
 date = dt.datetime.today()-  timedelta(1)
 date_1 = date.strftime("%m-%d-%Y")
-filename = f'Betfoxx_Daily_Deposits_{date_1}.xlsx'
+filename = f'Betfoxx_Daily_Transactions_{date_1}.xlsx'
 
     
-sub = f'Betfoxx_Deposits_Summary_{date_1}'
+sub = f'Betfoxx_Transaction_Details_{date_1}'
 
 # Write the DataFrame to Excel
 with pd.ExcelWriter(filename, engine='openpyxl') as writer:
@@ -181,7 +181,7 @@ def send_mail(send_from,send_to,subject,text,server,port,username='',password=''
 subject = sub
 body = f"Hi,\n\n Attached contains the Summary  of customers who made deposits on {date_1} for Betfoxx \n\nThanks,\nSaketh"
 sender = "sakethg250@gmail.com"
-recipients = ["saketh.sgc@gmail.com","alberto@crystalwg.com","isaac@crystalwg.com","sebastian@crystalwg.com","saketh@crystalwg.com"]
+recipients = ["saketh.sgc@gmail.com","alberto@crystalwg.com","isaac@crystalwg.com","sebastian@crystalwg.com","saketh@crystalwg.com","ron@crystalwg.com","shiley@crystalwg.com"]
 password = "xjyb jsdl buri ylqr"
 
 send_mail(sender, recipients, subject, body, "smtp.gmail.com", 465,sender,password)
